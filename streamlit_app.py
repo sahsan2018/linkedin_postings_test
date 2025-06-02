@@ -1,24 +1,31 @@
 import streamlit as st
 import pandas as pd
+import sqlite3
 import os
 
 # 1. Load Data (update with your actual CSV filename)
-CSV_URL = st.secrets["CSV_URL"]
-DATA_PATH = "linkedin_job_postings.csv"
 
-if not os.path.exists(DATA_PATH):
-    st.info("Dataset not found locally. Downloading from Google Drive...")
+
+# --- Google Drive direct download link (replace with your own file ID!) ---
+DB_URL = st.secrets["DB_URL"]
+DB_PATH = "linkedin_job_postings.db"
+TABLE_NAME = "job_postings"
+
+# --- Download the DB if not present ---
+if not os.path.exists(DB_PATH):
+    st.info("Database not found locally. Downloading from Google Drive (this may take a while)...")
     try:
         import gdown
-        gdown.download(CSV_URL, DATA_PATH, quiet=False)
+        gdown.download(DB_URL, DB_PATH, quiet=False)
     except Exception as e:
-        st.error(f"Failed to download dataset: {e}")
+        st.error(f"Failed to download database: {e}")
         st.stop()
 
-df = pd.read_csv(DATA_PATH)
-df = df.fillna("")
+# --- Open SQLite connection ---
+conn = sqlite3.connect(DB_PATH)
 
-# 2. Define Broader Personas (can always edit these later)
+
+# 2. Define Personas
 personas = {
     "Data Scientist / Analyst": ["data analyst", "data science", "statistics", "analytics", "python", "r"],
     "Software/IT Professional": ["developer", "software", "programming", "engineer", "it", "network"],
@@ -36,8 +43,7 @@ personas = {
     "Custom": []
 }
 
-# 3. Streamlit UI
-st.title("LinkedIn Job Explorer (Multi-Industry, Persona-Powered)")
+st.title("LinkedIn Job Explorer (SQLite Powered)")
 st.write("Find jobs tailored for your career path or interests.")
 
 # Persona selection
@@ -54,41 +60,55 @@ else:
     if extra_keywords:
         keywords += extra_keywords
 
-# 4. Extra Filters (Location, Company, Work Type, Experience Level)
+# Extra Filters
+def get_unique(col):
+    # Use SQL for unique values
+    q = f"SELECT DISTINCT {col} FROM {TABLE_NAME} WHERE {col} IS NOT NULL AND {col} != ''"
+    result = pd.read_sql(q, conn)[col].sort_values().tolist()
+    return result
+
 with st.expander("More filters"):
-    location_options = sorted({loc for loc in df["location"].unique() if loc})
+    location_options = get_unique("location")
     selected_locations = st.multiselect("Job Location(s):", location_options)
-    company_options = sorted({comp for comp in df["company_name"].unique() if comp})
+    company_options = get_unique("company_name")
     selected_companies = st.multiselect("Company(s):", company_options)
-    work_type_options = sorted({wt for wt in df["formatted_work_type"].unique() if wt})
+    work_type_options = get_unique("formatted_work_type")
     selected_work_types = st.multiselect("Work Type(s):", work_type_options)
-    experience_options = sorted({exp for exp in df["formatted_experience_level"].unique() if exp})
+    experience_options = get_unique("formatted_experience_level")
     selected_experiences = st.multiselect("Experience Level(s):", experience_options)
 
-# 5. Filtering Logic (uses correct columns!)
-def row_matches_keywords(row, keywords):
-    haystack = " ".join([
-        str(row["title"]),
-        str(row["description"]),
-        str(row["skills_desc"])
-    ]).lower()
-    return any(kw in haystack for kw in keywords)
+# --- SQL Query Construction ---
+where_clauses = []
+params = []
 
+# Keywords in title, description, skills_desc
 if keywords:
-    filtered_df = df[df.apply(lambda row: row_matches_keywords(row, keywords), axis=1)]
-else:
-    filtered_df = df.copy()
+    kw_clause = "(" + " OR ".join(
+        [f"LOWER(title) LIKE ?" for _ in keywords] +
+        [f"LOWER(description) LIKE ?" for _ in keywords] +
+        [f"LOWER(skills_desc) LIKE ?" for _ in keywords]
+    ) + ")"
+    where_clauses.append(kw_clause)
+    params += [f"%{kw}%" for kw in keywords] * 3
 
 if selected_locations:
-    filtered_df = filtered_df[filtered_df["location"].isin(selected_locations)]
+    placeholders = ",".join(["?"] * len(selected_locations))
+    where_clauses.append(f"location IN ({placeholders})")
+    params += selected_locations
 if selected_companies:
-    filtered_df = filtered_df[filtered_df["company_name"].isin(selected_companies)]
+    placeholders = ",".join(["?"] * len(selected_companies))
+    where_clauses.append(f"company_name IN ({placeholders})")
+    params += selected_companies
 if selected_work_types:
-    filtered_df = filtered_df[filtered_df["formatted_work_type"].isin(selected_work_types)]
+    placeholders = ",".join(["?"] * len(selected_work_types))
+    where_clauses.append(f"formatted_work_type IN ({placeholders})")
+    params += selected_work_types
 if selected_experiences:
-    filtered_df = filtered_df[filtered_df["formatted_experience_level"].isin(selected_experiences)]
+    placeholders = ",".join(["?"] * len(selected_experiences))
+    where_clauses.append(f"formatted_experience_level IN ({placeholders})")
+    params += selected_experiences
 
-# 6. Grouping & Display (adjusted grouping columns)
+where = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 groupby_option = st.selectbox(
     "Group results by:",
     ["None", "location", "company_name", "formatted_work_type", "formatted_experience_level"]
@@ -105,22 +125,26 @@ display_cols = [
     "job_posting_url"
 ]
 
-if filtered_df.empty:
+# --- Run SQL Query ---
+LIMIT = 1000  # set a reasonable limit for performance
+query = f"SELECT {', '.join(display_cols)} FROM {TABLE_NAME} {where} LIMIT {LIMIT}"
+df = pd.read_sql(query, conn, params=params)
+
+if df.empty:
     st.warning("No jobs found for these criteria. Try adjusting keywords or filters.")
 else:
-    st.success(f"Found {filtered_df.shape[0]} matching jobs.")
+    st.success(f"Found {df.shape[0]} matching jobs (showing up to {LIMIT}).")
 
     if groupby_option == "None":
-        st.dataframe(filtered_df[display_cols].head(50))
+        st.dataframe(df.head(50))
     else:
-        for group, group_df in filtered_df.groupby(groupby_option):
+        for group, group_df in df.groupby(groupby_option):
             st.subheader(f"{groupby_option.replace('_', ' ').title()}: {group} ({len(group_df)})")
-            st.dataframe(group_df[display_cols].head(10))
+            st.dataframe(group_df.head(10))
 
-# 7. Download Results
-if not filtered_df.empty:
+    # Download filtered results
     st.download_button(
         label="Download these results as CSV",
-        data=filtered_df[display_cols].to_csv(index=False),
+        data=df.to_csv(index=False),
         file_name="filtered_jobs.csv"
     )
