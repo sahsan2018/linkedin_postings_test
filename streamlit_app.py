@@ -1,16 +1,22 @@
 import streamlit as st
 import pandas as pd
+import os
 
 # 1. Load Data (update with your actual CSV filename)
-st.title("LinkedIn Job Explorer (Multi-Industry, Persona-Powered)")
+CSV_URL = st.secrets["CSV_URL"]
+DATA_PATH = "linkedin_job_postings.csv"
 
-uploaded = st.file_uploader("Upload your 'linkedin_job_postings.csv' file", type="csv")
-if uploaded is not None:
-    df = pd.read_csv(uploaded)
-    df = df.fillna("")
-else:
-    st.warning("Please upload the dataset to continue.")
-    st.stop()
+if not os.path.exists(DATA_PATH):
+    st.info("Dataset not found locally. Downloading from Google Drive...")
+    try:
+        import gdown
+        gdown.download(CSV_URL, DATA_PATH, quiet=False)
+    except Exception as e:
+        st.error(f"Failed to download dataset: {e}")
+        st.stop()
+
+df = pd.read_csv(DATA_PATH)
+df = df.fillna("")
 
 # 2. Define Broader Personas (can always edit these later)
 personas = {
