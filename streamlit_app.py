@@ -7,13 +7,18 @@ import os
 
 
 # --- Google Drive direct download link (replace with your own file ID!) ---
-DB_URL = st.secrets["DB_URL"]
 DB_PATH = "linkedin_job_postings.db"
 TABLE_NAME = "job_postings"
 
 # --- Download the DB if not present ---
 if not os.path.exists(DB_PATH):
-    st.info("Database not found locally. Downloading from Google Drive (this may take a while)...")
+    st.info(
+        "Database not found locally. Downloading from Google Drive (this may take a while)..."
+    )
+    DB_URL = st.secrets.get("DB_URL")
+    if not DB_URL:
+        st.error("Missing DB_URL secret for database download.")
+        st.stop()
     try:
         import gdown
         gdown.download(DB_URL, DB_PATH, quiet=False)
