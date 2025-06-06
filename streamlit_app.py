@@ -87,13 +87,17 @@ params = []
 
 # Keywords in title, description, skills_desc
 if keywords:
-    kw_clause = "(" + " OR ".join(
-        [f"LOWER(title) LIKE ?" for _ in keywords] +
-        [f"LOWER(description) LIKE ?" for _ in keywords] +
-        [f"LOWER(skills_desc) LIKE ?" for _ in keywords]
-    ) + ")"
-    where_clauses.append(kw_clause)
-    params += [f"%{kw}%" for kw in keywords] * 3
+    keyword_clauses = []
+    for kw in keywords:
+        keyword_clauses.append(
+            "("
+            "LOWER(title) LIKE ? OR "
+            "LOWER(description) LIKE ? OR "
+            "LOWER(skills_desc) LIKE ?"
+            ")"
+        )
+        params.extend([f"%{kw}%"] * 3)
+    where_clauses.append(" AND ".join(keyword_clauses))
 
 if selected_locations:
     placeholders = ",".join(["?"] * len(selected_locations))
