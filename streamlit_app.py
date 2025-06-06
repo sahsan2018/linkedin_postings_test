@@ -3,8 +3,7 @@ import pandas as pd
 import sqlite3
 import os
 
-# 1. Load Data (update with your actual CSV filename)
-
+# The database will be downloaded from Google Drive if not found locally
 
 # --- Google Drive direct download link (replace with your own file ID!) ---
 DB_PATH = "linkedin_job_postings.db"
